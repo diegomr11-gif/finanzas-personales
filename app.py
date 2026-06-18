@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import date
 
-DB = "finanzas_v4.db"
+DB = "finanzas_v5.db"
 
 st.set_page_config(page_title="Mis Finanzas", page_icon="💰", layout="wide")
 
@@ -70,7 +70,8 @@ def crear_tablas():
         usuario TEXT,
         nombre TEXT,
         valor REAL,
-        predeterminado INTEGER
+        predeterminado_15 INTEGER DEFAULT 0,
+        predeterminado_30 INTEGER DEFAULT 0
     )
     """)
 
@@ -348,7 +349,8 @@ else:
         with st.form("form_catalogo_gasto"):
             nombre = st.text_input("Nombre del gasto fijo")
             valor = st.number_input("Valor", min_value=0.0, step=1000.0)
-            predeterminado = st.checkbox("Predeterminado")
+            pred_15 = st.checkbox("Predeterminado para quincena del 15")
+            pred_30 = st.checkbox("Predeterminado para quincena del 30")
             agregar = st.form_submit_button("Agregar gasto fijo")
 
         if agregar:
@@ -356,8 +358,12 @@ else:
                 st.warning("Escribe nombre y valor.")
             else:
                 ejecutar(
-                    "INSERT INTO catalogo_gastos_fijos (usuario, nombre, valor, predeterminado) VALUES (?, ?, ?, ?)",
-                    (usuario_actual, nombre, valor, 1 if predeterminado else 0)
+                    """
+                    INSERT INTO catalogo_gastos_fijos 
+                    (usuario, nombre, valor, predeterminado_15, predeterminado_30)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (usuario_actual, nombre, valor, 1 if pred_15 else 0, 1 if pred_30 else 0)
                 )
                 st.success("Gasto fijo agregado al catálogo.")
                 st.rerun()
@@ -371,7 +377,13 @@ else:
             st.info("No tienes gastos fijos en el catálogo.")
         else:
             for _, fila in catalogo.iterrows():
-                estado = "Predeterminado" if fila["predeterminado"] == 1 else "Opcional"
+                etiquetas = []
+                if fila["predeterminado_15"] == 1:
+                    etiquetas.append("15")
+                if fila["predeterminado_30"] == 1:
+                    etiquetas.append("30")
+                estado = "Predeterminado: " + ", ".join(etiquetas) if etiquetas else "Opcional"
+
                 with st.expander(f"{fila['nombre']} - ${fila['valor']:,.0f} | {estado}"):
                     nuevo_nombre = st.text_input("Nombre", value=fila["nombre"], key=f"cat_n{fila['id']}")
                     nuevo_valor = st.number_input(
@@ -381,10 +393,15 @@ else:
                         step=1000.0,
                         key=f"cat_v{fila['id']}"
                     )
-                    nuevo_pred = st.checkbox(
-                        "Predeterminado",
-                        value=True if fila["predeterminado"] == 1 else False,
-                        key=f"cat_p{fila['id']}"
+                    nuevo_pred_15 = st.checkbox(
+                        "Predeterminado para quincena del 15",
+                        value=True if fila["predeterminado_15"] == 1 else False,
+                        key=f"cat_p15_{fila['id']}"
+                    )
+                    nuevo_pred_30 = st.checkbox(
+                        "Predeterminado para quincena del 30",
+                        value=True if fila["predeterminado_30"] == 1 else False,
+                        key=f"cat_p30_{fila['id']}"
                     )
 
                     col_a, col_b = st.columns(2)
@@ -392,8 +409,18 @@ else:
                     with col_a:
                         if st.button("Guardar cambios", key=f"cat_e{fila['id']}"):
                             ejecutar(
-                                "UPDATE catalogo_gastos_fijos SET nombre=?, valor=?, predeterminado=? WHERE id=?",
-                                (nuevo_nombre, nuevo_valor, 1 if nuevo_pred else 0, int(fila["id"]))
+                                """
+                                UPDATE catalogo_gastos_fijos 
+                                SET nombre=?, valor=?, predeterminado_15=?, predeterminado_30=?
+                                WHERE id=?
+                                """,
+                                (
+                                    nuevo_nombre,
+                                    nuevo_valor,
+                                    1 if nuevo_pred_15 else 0,
+                                    1 if nuevo_pred_30 else 0,
+                                    int(fila["id"])
+                                )
                             )
                             st.success("Actualizado.")
                             st.rerun()
@@ -431,7 +458,12 @@ else:
                 if not asignados.empty:
                     ya_asignado = int(gasto["id"]) in asignados["gasto_id"].astype(int).tolist()
 
-                valor_default = ya_asignado or gasto["predeterminado"] == 1
+                if quincena == "15 del mes":
+                    pred_quincena = gasto["predeterminado_15"] == 1
+                else:
+                    pred_quincena = gasto["predeterminado_30"] == 1
+
+                valor_default = ya_asignado or pred_quincena
 
                 col_check, col_valor = st.columns([3, 1])
 
@@ -510,8 +542,18 @@ else:
             (usuario_actual, anio, mes, quincena)
         )
 
-        if not gd.empty:
-            st.dataframe(gd[["descripcion", "valor", "fecha"]])
+        if gd.empty:
+            st.info("No hay gastos diarios en esta quincena.")
+        else:
+            for _, fila in gd.iterrows():
+                col_gd1, col_gd2 = st.columns([4, 1])
+                with col_gd1:
+                    st.write(f"{fila['descripcion']} | ${fila['valor']:,.0f} | {fila['fecha']}")
+                with col_gd2:
+                    if st.button("Eliminar", key=f"del_gd_{fila['id']}"):
+                        ejecutar("DELETE FROM gastos_diarios WHERE id=?", (int(fila["id"]),))
+                        st.success("Gasto diario eliminado.")
+                        st.rerun()
 
     with tab5:
         st.subheader(f"➕ Dinero extra - {quincena}")
@@ -538,8 +580,18 @@ else:
             (usuario_actual, anio, mes, quincena)
         )
 
-        if not ex.empty:
-            st.dataframe(ex[["descripcion", "valor", "fecha"]])
+        if ex.empty:
+            st.info("No hay dinero extra en esta quincena.")
+        else:
+            for _, fila in ex.iterrows():
+                col_ex1, col_ex2 = st.columns([4, 1])
+                with col_ex1:
+                    st.write(f"{fila['descripcion']} | ${fila['valor']:,.0f} | {fila['fecha']}")
+                with col_ex2:
+                    if st.button("Eliminar", key=f"del_ex_{fila['id']}"):
+                        ejecutar("DELETE FROM extras WHERE id=?", (int(fila["id"]),))
+                        st.success("Dinero extra eliminado.")
+                        st.rerun()
 
     with tab6:
         st.subheader("💳 Tarjetas de crédito")
@@ -625,7 +677,15 @@ else:
                     if mov.empty:
                         st.info("Esta tarjeta no tiene movimientos.")
                     else:
-                        st.dataframe(mov[["tipo", "descripcion", "valor", "fecha"]])
+                        for _, m in mov.iterrows():
+                            col_m1, col_m2 = st.columns([4, 1])
+                            with col_m1:
+                                st.write(f"{m['tipo']} | {m['descripcion']} | ${m['valor']:,.0f} | {m['fecha']}")
+                            with col_m2:
+                                if st.button("Eliminar", key=f"del_mov_t_{m['id']}"):
+                                    ejecutar("DELETE FROM movimientos_tarjeta WHERE id=?", (int(m["id"]),))
+                                    st.success("Movimiento eliminado.")
+                                    st.rerun()
 
                     st.markdown("### Administrar tarjeta")
                     nuevo_nombre_tarjeta = st.text_input(
@@ -634,7 +694,7 @@ else:
                         key=f"edit_nombre_tarjeta_{tarjeta['id']}"
                     )
                     nuevo_cupo_tarjeta = st.number_input(
-                        "Editar cupo",
+                        "Editar cupo total",
                         min_value=0.0,
                         value=float(tarjeta["cupo_total"]),
                         step=1000.0,
@@ -655,14 +715,8 @@ else:
                     with col_delete_t:
                         st.warning("Eliminar esta tarjeta también elimina sus compras y pagos.")
                         if st.button("Eliminar tarjeta", key=f"eliminar_tarjeta_{tarjeta['id']}"):
-                            ejecutar(
-                                "DELETE FROM movimientos_tarjeta WHERE tarjeta_id=?",
-                                (int(tarjeta["id"]),)
-                            )
-                            ejecutar(
-                                "DELETE FROM tarjetas WHERE id=?",
-                                (int(tarjeta["id"]),)
-                            )
+                            ejecutar("DELETE FROM movimientos_tarjeta WHERE tarjeta_id=?", (int(tarjeta["id"]),))
+                            ejecutar("DELETE FROM tarjetas WHERE id=?", (int(tarjeta["id"]),))
                             st.success("Tarjeta eliminada.")
                             st.rerun()
 
