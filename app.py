@@ -202,10 +202,12 @@ if not st.session_state.login:
     tab1, tab2 = st.tabs(["Iniciar sesión", "Crear cuenta"])
 
     with tab1:
-        usuario = st.text_input("Usuario")
-        clave = st.text_input("Contraseña", type="password")
+        with st.form("form_login"):
+            usuario = st.text_input("Usuario")
+            clave = st.text_input("Contraseña", type="password")
+            entrar = st.form_submit_button("Entrar")
 
-        if st.button("Entrar"):
+        if entrar:
             if validar_usuario(usuario, clave):
                 st.session_state.login = True
                 st.session_state.usuario = usuario
@@ -214,10 +216,12 @@ if not st.session_state.login:
                 st.error("Usuario o contraseña incorrectos")
 
     with tab2:
-        nuevo_usuario = st.text_input("Crear usuario")
-        nueva_clave = st.text_input("Crear contraseña", type="password")
+        with st.form("form_crear_usuario"):
+            nuevo_usuario = st.text_input("Crear usuario")
+            nueva_clave = st.text_input("Crear contraseña", type="password")
+            crear = st.form_submit_button("Crear cuenta")
 
-        if st.button("Crear cuenta"):
+        if crear:
             if nuevo_usuario == "" or nueva_clave == "":
                 st.warning("Llena usuario y contraseña.")
             elif crear_usuario(nuevo_usuario, nueva_clave):
@@ -285,9 +289,11 @@ else:
     with tab1:
         st.subheader(f"💵 Registrar salario - {quincena}")
 
-        salario = st.number_input("Valor recibido en esta quincena", min_value=0.0, step=1000.0)
+        with st.form("form_salario"):
+            salario = st.number_input("Valor recibido en esta quincena", min_value=0.0, step=1000.0)
+            guardar_salario = st.form_submit_button("Guardar salario")
 
-        if st.button("Guardar salario"):
+        if guardar_salario:
             if salario <= 0:
                 st.warning("Ingresa un valor.")
             else:
@@ -303,16 +309,37 @@ else:
             (usuario_actual, anio, mes, quincena)
         )
 
-        if not registros.empty:
-            st.dataframe(registros[["anio", "mes", "quincena", "salario", "fecha"]])
+        if registros.empty:
+            st.info("No hay salarios guardados para esta quincena.")
+        else:
+            st.subheader("Salarios guardados")
+
+            for _, fila in registros.iterrows():
+                col_s1, col_s2 = st.columns([4, 1])
+
+                with col_s1:
+                    st.write(
+                        f"{fila['quincena']} | ${fila['salario']:,.0f} | {fila['fecha']}"
+                    )
+
+                with col_s2:
+                    if st.button("Eliminar", key=f"eliminar_salario_{fila['id']}"):
+                        ejecutar(
+                            "DELETE FROM quincenas WHERE id=?",
+                            (int(fila["id"]),)
+                        )
+                        st.success("Salario eliminado.")
+                        st.rerun()
 
     with tab2:
         st.subheader(f"🏠 Gastos fijos - {quincena}")
 
-        nombre = st.text_input("Nombre del gasto fijo")
-        valor = st.number_input("Valor del gasto fijo", min_value=0.0, step=1000.0)
+        with st.form("form_gasto_fijo"):
+            nombre = st.text_input("Nombre del gasto fijo")
+            valor = st.number_input("Valor del gasto fijo", min_value=0.0, step=1000.0)
+            agregar_gf = st.form_submit_button("Agregar gasto fijo")
 
-        if st.button("Agregar gasto fijo"):
+        if agregar_gf:
             if nombre == "" or valor <= 0:
                 st.warning("Escribe nombre y valor.")
             else:
@@ -362,11 +389,13 @@ else:
     with tab3:
         st.subheader(f"🧾 Gastos diarios - {quincena}")
 
-        descripcion = st.text_input("¿En qué gastaste?")
-        valor_gasto = st.number_input("Valor gastado", min_value=0.0, step=1000.0)
-        fecha_gasto = st.date_input("Fecha del gasto", date.today())
+        with st.form("form_gasto_diario"):
+            descripcion = st.text_input("¿En qué gastaste?")
+            valor_gasto = st.number_input("Valor gastado", min_value=0.0, step=1000.0)
+            fecha_gasto = st.date_input("Fecha del gasto", date.today())
+            guardar_gd = st.form_submit_button("Guardar gasto diario")
 
-        if st.button("Guardar gasto diario"):
+        if guardar_gd:
             if descripcion == "" or valor_gasto <= 0:
                 st.warning("Llena descripción y valor.")
             else:
@@ -388,11 +417,13 @@ else:
     with tab4:
         st.subheader(f"➕ Dinero extra - {quincena}")
 
-        desc_extra = st.text_input("Descripción del dinero extra")
-        valor_extra = st.number_input("Valor extra", min_value=0.0, step=1000.0)
-        fecha_extra = st.date_input("Fecha del dinero extra", date.today())
+        with st.form("form_dinero_extra"):
+            desc_extra = st.text_input("Descripción del dinero extra")
+            valor_extra = st.number_input("Valor extra", min_value=0.0, step=1000.0)
+            fecha_extra = st.date_input("Fecha del dinero extra", date.today())
+            guardar_extra = st.form_submit_button("Guardar dinero extra")
 
-        if st.button("Guardar dinero extra"):
+        if guardar_extra:
             if desc_extra == "" or valor_extra <= 0:
                 st.warning("Llena descripción y valor.")
             else:
@@ -414,10 +445,12 @@ else:
     with tab5:
         st.subheader("💳 Tarjetas de crédito")
 
-        nombre_tarjeta = st.text_input("Nombre de la tarjeta")
-        cupo_total = st.number_input("Cupo total", min_value=0.0, step=1000.0)
+        with st.form("form_tarjeta"):
+            nombre_tarjeta = st.text_input("Nombre de la tarjeta")
+            cupo_total = st.number_input("Cupo total", min_value=0.0, step=1000.0)
+            agregar_tarjeta = st.form_submit_button("Agregar tarjeta")
 
-        if st.button("Agregar tarjeta"):
+        if agregar_tarjeta:
             if nombre_tarjeta == "" or cupo_total <= 0:
                 st.warning("Escribe nombre y cupo.")
             else:
@@ -452,10 +485,13 @@ else:
                     c.metric("Disponible", f"${disponible:,.0f}")
 
                     st.markdown("### Registrar compra")
-                    desc_compra = st.text_input("Descripción compra", key=f"cd{tarjeta['id']}")
-                    valor_compra = st.number_input("Valor compra", min_value=0.0, step=1000.0, key=f"cv{tarjeta['id']}")
 
-                    if st.button("Guardar compra", key=f"cb{tarjeta['id']}"):
+                    with st.form(f"form_compra_{tarjeta['id']}"):
+                        desc_compra = st.text_input("Descripción compra")
+                        valor_compra = st.number_input("Valor compra", min_value=0.0, step=1000.0)
+                        guardar_compra = st.form_submit_button("Guardar compra")
+
+                    if guardar_compra:
                         if desc_compra == "" or valor_compra <= 0:
                             st.warning("Llena descripción y valor.")
                         elif valor_compra > disponible:
@@ -469,10 +505,13 @@ else:
                             st.rerun()
 
                     st.markdown("### Registrar pago")
-                    desc_pago = st.text_input("Descripción pago", key=f"pd{tarjeta['id']}")
-                    valor_pago = st.number_input("Valor pago", min_value=0.0, step=1000.0, key=f"pv{tarjeta['id']}")
 
-                    if st.button("Guardar pago", key=f"pb{tarjeta['id']}"):
+                    with st.form(f"form_pago_{tarjeta['id']}"):
+                        desc_pago = st.text_input("Descripción pago")
+                        valor_pago = st.number_input("Valor pago", min_value=0.0, step=1000.0)
+                        guardar_pago = st.form_submit_button("Guardar pago")
+
+                    if guardar_pago:
                         if desc_pago == "" or valor_pago <= 0:
                             st.warning("Llena descripción y valor.")
                         elif valor_pago > deuda:
