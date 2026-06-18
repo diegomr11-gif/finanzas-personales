@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import date
 
-DB = "finanzas_v3.db"
+DB = "finanzas_v4.db"
 
 st.set_page_config(page_title="Mis Finanzas", page_icon="💰", layout="wide")
 
@@ -16,11 +16,14 @@ MESES = [
 
 QUINCENAS = ["15 del mes", "30 del mes"]
 
+
 def conectar():
     return sqlite3.connect(DB)
 
+
 def hash_clave(clave):
     return hashlib.sha256(clave.encode()).hexdigest()
+
 
 def ejecutar(sql, params=()):
     conn = conectar()
@@ -29,11 +32,13 @@ def ejecutar(sql, params=()):
     conn.commit()
     conn.close()
 
+
 def leer(sql, params=()):
     conn = conectar()
     df = pd.read_sql_query(sql, conn, params=params)
     conn.close()
     return df
+
 
 def crear_tablas():
     conn = conectar()
@@ -60,12 +65,23 @@ def crear_tablas():
     """)
 
     c.execute("""
-    CREATE TABLE IF NOT EXISTS gastos_fijos (
+    CREATE TABLE IF NOT EXISTS catalogo_gastos_fijos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario TEXT,
+        nombre TEXT,
+        valor REAL,
+        predeterminado INTEGER
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS gastos_fijos_quincena (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario TEXT,
         anio INTEGER,
         mes TEXT,
         quincena TEXT,
+        gasto_id INTEGER,
         nombre TEXT,
         valor REAL
     )
@@ -121,6 +137,7 @@ def crear_tablas():
     conn.commit()
     conn.close()
 
+
 def crear_usuario(usuario, clave):
     try:
         ejecutar(
@@ -128,8 +145,9 @@ def crear_usuario(usuario, clave):
             (usuario, hash_clave(clave))
         )
         return True
-    except:
+    except Exception:
         return False
+
 
 def validar_usuario(usuario, clave):
     df = leer(
@@ -138,6 +156,7 @@ def validar_usuario(usuario, clave):
     )
     return not df.empty
 
+
 def calcular_quincena(usuario, anio, mes, quincena):
     salario_df = leer(
         "SELECT * FROM quincenas WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
@@ -145,7 +164,7 @@ def calcular_quincena(usuario, anio, mes, quincena):
     )
 
     gf_df = leer(
-        "SELECT * FROM gastos_fijos WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
+        "SELECT * FROM gastos_fijos_quincena WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
         (usuario, anio, mes, quincena)
     )
 
@@ -184,9 +203,9 @@ def calcular_quincena(usuario, anio, mes, quincena):
         "gastos_diarios": gastos_diarios,
         "ahorro": ahorro,
         "placentero": placentero,
-        "libre": libre,
-        "restante": restante
+        "libre": libre
     }
+
 
 crear_tablas()
 
@@ -216,7 +235,7 @@ if not st.session_state.login:
                 st.error("Usuario o contraseña incorrectos")
 
     with tab2:
-        with st.form("form_crear_usuario"):
+        with st.form("form_crear"):
             nuevo_usuario = st.text_input("Crear usuario")
             nueva_clave = st.text_input("Crear contraseña", type="password")
             crear = st.form_submit_button("Crear cuenta")
@@ -277,9 +296,10 @@ else:
 
     st.divider()
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Quincena",
-        "Gastos fijos",
+        "Catálogo gastos fijos",
+        "Asignar gastos fijos",
         "Gastos diarios",
         "Dinero extra",
         "Tarjetas",
@@ -290,7 +310,7 @@ else:
         st.subheader(f"💵 Registrar salario - {quincena}")
 
         with st.form("form_salario"):
-            salario = st.number_input("Valor recibido en esta quincena", min_value=0.0, step=1000.0)
+            salario = st.number_input("Valor recibido", min_value=0.0, step=1000.0)
             guardar_salario = st.form_submit_button("Guardar salario")
 
         if guardar_salario:
@@ -310,83 +330,162 @@ else:
         )
 
         if registros.empty:
-            st.info("No hay salarios guardados para esta quincena.")
+            st.info("No hay salarios guardados.")
         else:
-            st.subheader("Salarios guardados")
-
             for _, fila in registros.iterrows():
                 col_s1, col_s2 = st.columns([4, 1])
-
                 with col_s1:
-                    st.write(
-                        f"{fila['quincena']} | ${fila['salario']:,.0f} | {fila['fecha']}"
-                    )
-
+                    st.write(f"{fila['quincena']} | ${fila['salario']:,.0f} | {fila['fecha']}")
                 with col_s2:
                     if st.button("Eliminar", key=f"eliminar_salario_{fila['id']}"):
-                        ejecutar(
-                            "DELETE FROM quincenas WHERE id=?",
-                            (int(fila["id"]),)
-                        )
+                        ejecutar("DELETE FROM quincenas WHERE id=?", (int(fila["id"]),))
                         st.success("Salario eliminado.")
                         st.rerun()
 
     with tab2:
-        st.subheader(f"🏠 Gastos fijos - {quincena}")
+        st.subheader("🏠 Catálogo de gastos fijos")
 
-        with st.form("form_gasto_fijo"):
+        with st.form("form_catalogo_gasto"):
             nombre = st.text_input("Nombre del gasto fijo")
-            valor = st.number_input("Valor del gasto fijo", min_value=0.0, step=1000.0)
-            agregar_gf = st.form_submit_button("Agregar gasto fijo")
+            valor = st.number_input("Valor", min_value=0.0, step=1000.0)
+            predeterminado = st.checkbox("Predeterminado")
+            agregar = st.form_submit_button("Agregar gasto fijo")
 
-        if agregar_gf:
+        if agregar:
             if nombre == "" or valor <= 0:
                 st.warning("Escribe nombre y valor.")
             else:
                 ejecutar(
-                    "INSERT INTO gastos_fijos (usuario, anio, mes, quincena, nombre, valor) VALUES (?, ?, ?, ?, ?, ?)",
-                    (usuario_actual, anio, mes, quincena, nombre, valor)
+                    "INSERT INTO catalogo_gastos_fijos (usuario, nombre, valor, predeterminado) VALUES (?, ?, ?, ?)",
+                    (usuario_actual, nombre, valor, 1 if predeterminado else 0)
                 )
-                st.success("Gasto fijo agregado.")
+                st.success("Gasto fijo agregado al catálogo.")
                 st.rerun()
 
-        gf = leer(
-            "SELECT * FROM gastos_fijos WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
-            (usuario_actual, anio, mes, quincena)
+        catalogo = leer(
+            "SELECT * FROM catalogo_gastos_fijos WHERE usuario=?",
+            (usuario_actual,)
         )
 
-        if gf.empty:
-            st.info("No hay gastos fijos para esta quincena.")
+        if catalogo.empty:
+            st.info("No tienes gastos fijos en el catálogo.")
         else:
-            for _, fila in gf.iterrows():
-                with st.expander(f"{fila['nombre']} - ${fila['valor']:,.0f}"):
-                    nuevo_nombre = st.text_input("Nombre", value=fila["nombre"], key=f"gfn{fila['id']}")
+            for _, fila in catalogo.iterrows():
+                estado = "Predeterminado" if fila["predeterminado"] == 1 else "Opcional"
+                with st.expander(f"{fila['nombre']} - ${fila['valor']:,.0f} | {estado}"):
+                    nuevo_nombre = st.text_input("Nombre", value=fila["nombre"], key=f"cat_n{fila['id']}")
                     nuevo_valor = st.number_input(
                         "Valor",
                         min_value=0.0,
                         value=float(fila["valor"]),
                         step=1000.0,
-                        key=f"gfv{fila['id']}"
+                        key=f"cat_v{fila['id']}"
+                    )
+                    nuevo_pred = st.checkbox(
+                        "Predeterminado",
+                        value=True if fila["predeterminado"] == 1 else False,
+                        key=f"cat_p{fila['id']}"
                     )
 
-                    col_editar, col_eliminar = st.columns(2)
+                    col_a, col_b = st.columns(2)
 
-                    with col_editar:
-                        if st.button("Guardar cambios", key=f"gfe{fila['id']}"):
+                    with col_a:
+                        if st.button("Guardar cambios", key=f"cat_e{fila['id']}"):
                             ejecutar(
-                                "UPDATE gastos_fijos SET nombre=?, valor=? WHERE id=?",
-                                (nuevo_nombre, nuevo_valor, int(fila["id"]))
+                                "UPDATE catalogo_gastos_fijos SET nombre=?, valor=?, predeterminado=? WHERE id=?",
+                                (nuevo_nombre, nuevo_valor, 1 if nuevo_pred else 0, int(fila["id"]))
                             )
                             st.success("Actualizado.")
                             st.rerun()
 
-                    with col_eliminar:
-                        if st.button("Eliminar", key=f"gfd{fila['id']}"):
-                            ejecutar("DELETE FROM gastos_fijos WHERE id=?", (int(fila["id"]),))
+                    with col_b:
+                        if st.button("Eliminar", key=f"cat_d{fila['id']}"):
+                            ejecutar("DELETE FROM catalogo_gastos_fijos WHERE id=?", (int(fila["id"]),))
+                            ejecutar("DELETE FROM gastos_fijos_quincena WHERE gasto_id=?", (int(fila["id"]),))
                             st.success("Eliminado.")
                             st.rerun()
 
     with tab3:
+        st.subheader(f"✅ Asignar gastos fijos a {quincena}")
+
+        catalogo = leer(
+            "SELECT * FROM catalogo_gastos_fijos WHERE usuario=?",
+            (usuario_actual,)
+        )
+
+        asignados = leer(
+            "SELECT * FROM gastos_fijos_quincena WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
+            (usuario_actual, anio, mes, quincena)
+        )
+
+        if catalogo.empty:
+            st.warning("Primero agrega gastos fijos en el catálogo.")
+        else:
+            st.write("Selecciona los gastos que aplican para esta quincena.")
+
+            seleccionados = []
+
+            for _, gasto in catalogo.iterrows():
+                ya_asignado = False
+
+                if not asignados.empty:
+                    ya_asignado = int(gasto["id"]) in asignados["gasto_id"].astype(int).tolist()
+
+                valor_default = ya_asignado or gasto["predeterminado"] == 1
+
+                col_check, col_valor = st.columns([3, 1])
+
+                with col_check:
+                    marcado = st.checkbox(
+                        f"{gasto['nombre']} - ${gasto['valor']:,.0f}",
+                        value=valor_default,
+                        key=f"check_{anio}_{mes}_{quincena}_{gasto['id']}"
+                    )
+
+                with col_valor:
+                    valor_editado = st.number_input(
+                        "Valor",
+                        min_value=0.0,
+                        value=float(gasto["valor"]),
+                        step=1000.0,
+                        key=f"valor_asig_{anio}_{mes}_{quincena}_{gasto['id']}"
+                    )
+
+                if marcado:
+                    seleccionados.append((int(gasto["id"]), gasto["nombre"], valor_editado))
+
+            if st.button("Guardar gastos fijos de esta quincena"):
+                ejecutar(
+                    "DELETE FROM gastos_fijos_quincena WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
+                    (usuario_actual, anio, mes, quincena)
+                )
+
+                for gasto_id, nombre_gasto, valor_gasto in seleccionados:
+                    ejecutar(
+                        """
+                        INSERT INTO gastos_fijos_quincena 
+                        (usuario, anio, mes, quincena, gasto_id, nombre, valor)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (usuario_actual, anio, mes, quincena, gasto_id, nombre_gasto, valor_gasto)
+                    )
+
+                st.success("Gastos fijos guardados para esta quincena.")
+                st.rerun()
+
+            st.subheader("Gastos aplicados actualmente")
+
+            asignados = leer(
+                "SELECT * FROM gastos_fijos_quincena WHERE usuario=? AND anio=? AND mes=? AND quincena=?",
+                (usuario_actual, anio, mes, quincena)
+            )
+
+            if asignados.empty:
+                st.info("Aún no hay gastos asignados a esta quincena.")
+            else:
+                st.dataframe(asignados[["nombre", "valor"]])
+
+    with tab4:
         st.subheader(f"🧾 Gastos diarios - {quincena}")
 
         with st.form("form_gasto_diario"):
@@ -414,22 +513,22 @@ else:
         if not gd.empty:
             st.dataframe(gd[["descripcion", "valor", "fecha"]])
 
-    with tab4:
+    with tab5:
         st.subheader(f"➕ Dinero extra - {quincena}")
 
-        with st.form("form_dinero_extra"):
-            desc_extra = st.text_input("Descripción del dinero extra")
+        with st.form("form_extra"):
+            descripcion_extra = st.text_input("Descripción")
             valor_extra = st.number_input("Valor extra", min_value=0.0, step=1000.0)
             fecha_extra = st.date_input("Fecha del dinero extra", date.today())
             guardar_extra = st.form_submit_button("Guardar dinero extra")
 
         if guardar_extra:
-            if desc_extra == "" or valor_extra <= 0:
+            if descripcion_extra == "" or valor_extra <= 0:
                 st.warning("Llena descripción y valor.")
             else:
                 ejecutar(
                     "INSERT INTO extras (usuario, anio, mes, quincena, descripcion, valor, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (usuario_actual, anio, mes, quincena, desc_extra, valor_extra, str(fecha_extra))
+                    (usuario_actual, anio, mes, quincena, descripcion_extra, valor_extra, str(fecha_extra))
                 )
                 st.success("Dinero extra guardado.")
                 st.rerun()
@@ -442,7 +541,7 @@ else:
         if not ex.empty:
             st.dataframe(ex[["descripcion", "valor", "fecha"]])
 
-    with tab5:
+    with tab6:
         st.subheader("💳 Tarjetas de crédito")
 
         with st.form("form_tarjeta"):
@@ -484,9 +583,8 @@ else:
                     b.metric("Deuda", f"${deuda:,.0f}")
                     c.metric("Disponible", f"${disponible:,.0f}")
 
-                    st.markdown("### Registrar compra")
-
                     with st.form(f"form_compra_{tarjeta['id']}"):
+                        st.markdown("### Registrar compra")
                         desc_compra = st.text_input("Descripción compra")
                         valor_compra = st.number_input("Valor compra", min_value=0.0, step=1000.0)
                         guardar_compra = st.form_submit_button("Guardar compra")
@@ -504,9 +602,8 @@ else:
                             st.success("Compra guardada.")
                             st.rerun()
 
-                    st.markdown("### Registrar pago")
-
                     with st.form(f"form_pago_{tarjeta['id']}"):
+                        st.markdown("### Registrar pago")
                         desc_pago = st.text_input("Descripción pago")
                         valor_pago = st.number_input("Valor pago", min_value=0.0, step=1000.0)
                         guardar_pago = st.form_submit_button("Guardar pago")
@@ -524,15 +621,56 @@ else:
                             st.success("Pago guardado.")
                             st.rerun()
 
-                    if not mov.empty:
+                    st.markdown("### Movimientos")
+                    if mov.empty:
+                        st.info("Esta tarjeta no tiene movimientos.")
+                    else:
                         st.dataframe(mov[["tipo", "descripcion", "valor", "fecha"]])
+
+                    st.markdown("### Administrar tarjeta")
+                    nuevo_nombre_tarjeta = st.text_input(
+                        "Editar nombre",
+                        value=tarjeta["nombre"],
+                        key=f"edit_nombre_tarjeta_{tarjeta['id']}"
+                    )
+                    nuevo_cupo_tarjeta = st.number_input(
+                        "Editar cupo",
+                        min_value=0.0,
+                        value=float(tarjeta["cupo_total"]),
+                        step=1000.0,
+                        key=f"edit_cupo_tarjeta_{tarjeta['id']}"
+                    )
+
+                    col_edit_t, col_delete_t = st.columns(2)
+
+                    with col_edit_t:
+                        if st.button("Guardar cambios tarjeta", key=f"guardar_tarjeta_{tarjeta['id']}"):
+                            ejecutar(
+                                "UPDATE tarjetas SET nombre=?, cupo_total=? WHERE id=?",
+                                (nuevo_nombre_tarjeta, nuevo_cupo_tarjeta, int(tarjeta["id"]))
+                            )
+                            st.success("Tarjeta actualizada.")
+                            st.rerun()
+
+                    with col_delete_t:
+                        st.warning("Eliminar esta tarjeta también elimina sus compras y pagos.")
+                        if st.button("Eliminar tarjeta", key=f"eliminar_tarjeta_{tarjeta['id']}"):
+                            ejecutar(
+                                "DELETE FROM movimientos_tarjeta WHERE tarjeta_id=?",
+                                (int(tarjeta["id"]),)
+                            )
+                            ejecutar(
+                                "DELETE FROM tarjetas WHERE id=?",
+                                (int(tarjeta["id"]),)
+                            )
+                            st.success("Tarjeta eliminada.")
+                            st.rerun()
 
             st.error(f"TOTAL DEUDA EN TARJETAS: ${total_deuda:,.0f}")
 
-    with tab6:
+    with tab7:
         st.subheader(f"📅 Extracto mensual - {mes} {anio}")
 
-        st.markdown("### Quincena 15")
         q15 = pd.DataFrame({
             "Concepto": ["Ingresos", "Gastos fijos", "Gastos diarios", "Ahorro", "Placentero", "Libre"],
             "Valor": [
@@ -544,9 +682,7 @@ else:
                 datos_15["libre"]
             ]
         })
-        st.dataframe(q15)
 
-        st.markdown("### Quincena 30")
         q30 = pd.DataFrame({
             "Concepto": ["Ingresos", "Gastos fijos", "Gastos diarios", "Ahorro", "Placentero", "Libre"],
             "Valor": [
@@ -558,9 +694,6 @@ else:
                 datos_30["libre"]
             ]
         })
-        st.dataframe(q30)
-
-        st.markdown("### Total del mes")
 
         resumen_mes = pd.DataFrame({
             "Concepto": ["Ingresos", "Gastos fijos", "Gastos diarios", "Ahorro", "Placentero", "Libre"],
@@ -574,7 +707,13 @@ else:
             ]
         })
 
+        st.markdown("### Quincena 15")
+        st.dataframe(q15)
+
+        st.markdown("### Quincena 30")
+        st.dataframe(q30)
+
+        st.markdown("### Total del mes")
         fig = px.bar(resumen_mes, x="Concepto", y="Valor", text_auto=True, title=f"Resumen {mes} {anio}")
         st.plotly_chart(fig, use_container_width=True)
-
         st.dataframe(resumen_mes)
